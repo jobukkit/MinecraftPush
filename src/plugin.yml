@@ -1,0 +1,24 @@
+author: Jop Vernooij
+description: Get push notifications from your Minecraft server via Pushover.
+main: net.jopv.minecraft.bukkit.minecraftpush.MinecraftPush
+name: MinecraftPush
+version: 1.0.0
+permissions:
+    minecraftpush.receive:
+        description: Can player receive notifications.
+        default: true
+    minecraftpush.broadcast:
+        description: Can player broadcast.
+        default: op
+commands:
+    pushover:
+        description: Enable or disable notifications for yourself.
+        usage: /pushover <enable/disable> <pushover user key> §7(Get your user key by going to https://www.pushover.net/, logging in, copying it, and pasting it here using CTRL+V.)
+        aliases:
+            - notifications
+    broadcast:
+        description: Broadcast to all online players, and to all offline players with notifications enabled.
+        usage: /broadcast <message>
+    minecraftpush:
+        description: Copyright, source code, and donation information of MinecraftPush.
+        usage: /minecraftpush
