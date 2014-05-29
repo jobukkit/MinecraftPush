@@ -2,7 +2,7 @@ author: Jop Vernooij
 description: Get push notifications from your Minecraft server via Pushover.
 main: net.jopv.minecraft.bukkit.minecraftpush.MinecraftPush
 name: MinecraftPush
-version: 1.0.0
+version: 1.0.1
 permissions:
     minecraftpush.receive:
         description: Can player receive notifications.

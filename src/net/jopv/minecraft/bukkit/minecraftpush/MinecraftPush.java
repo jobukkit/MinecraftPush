@@ -4,6 +4,7 @@ import net.pushover.client.PushoverException;
 import net.pushover.client.PushoverMessage;
 import net.pushover.client.PushoverRestClient;
 
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -37,7 +38,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 
 	public int invalidUsers;
 
-	public String titleEnd = null;
+	public String titleEnd = "";
 
 	public void onEnable() {
 		getServer().getPluginManager().registerEvents(this, this);
@@ -207,10 +208,29 @@ public class MinecraftPush extends JavaPlugin implements Listener
 		for (String playerUuidString : map.keySet())
 		{
 			UUID playerUuid = UUID.fromString(playerUuidString);
-			Player player = getOnlinePlayerByUuid(playerUuid);
+			Player onlinePlayer = getOnlinePlayerByUuid(playerUuid);
 			String playerPushoverKey = String.valueOf(map.get(playerUuidString));
-			if (player == null /* Player is offline, so a notification needs to be sent */ && ! playerPushoverKey.equals("INVALID"))
+
+			if (playerPushoverKey.equals("INVALID") || playerPushoverKey.equals("BANNED"))
+				return;
+
+			if (onlinePlayer == null /* Player is offline, so a notification needs to be sent */)
 			{
+				try
+				{
+					if (Bukkit.getOfflinePlayer(playerUuid).isBanned())
+					{
+						getUserKeysFileConfiguration().set(playerUuidString, map.get(playerUuidString) + "BANNED");
+						return;
+					}
+					else if ( ((String )map.get(playerUuidString)).endsWith("BANNED") )
+					{
+						String s = (String) map.get(playerUuidString);
+						getUserKeysFileConfiguration().set(playerUuidString, s.substring(0, s.indexOf("BANNED")));
+					}
+				}
+				catch (Exception ignored) {}
+
 				try
 				{
 					pushoverRestClient.pushMessage(PushoverMessage.builderWithApiToken("autoU13MYYXYxMaeupaqF7U7mBe9Bj")
@@ -261,10 +281,16 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	}
 
 	public Player getOnlinePlayerByUuid(UUID uuid) {
-		for(Player p : getServer().getOnlinePlayers())
-			if (p.getUniqueId().equals(uuid))
-				return p;
-
+		try
+		{
+			getServer().getPlayer(uuid);
+		}
+		catch (Exception e)
+		{
+			for (Player p : getServer().getOnlinePlayers())
+				if (p.getUniqueId().equals(uuid))
+					return p;
+		}
 		return null;
 	}
 }
