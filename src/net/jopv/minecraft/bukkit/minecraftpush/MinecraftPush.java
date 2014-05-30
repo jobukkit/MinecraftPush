@@ -281,9 +281,10 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	}
 
 	public Player getOnlinePlayerByUuid(UUID uuid) {
+		Player player = null;
 		try
 		{
-			getServer().getPlayer(uuid);
+			player = getServer().getPlayer(uuid);
 		}
 		catch (Exception e)
 		{
@@ -291,6 +292,6 @@ public class MinecraftPush extends JavaPlugin implements Listener
 				if (p.getUniqueId().equals(uuid))
 					return p;
 		}
-		return null;
+		return player;
 	}
 }
