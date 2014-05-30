@@ -1,11 +1,13 @@
 package net.jopv.minecraft.bukkit.minecraftpush;
 
+import net.pushover.client.MessagePriority;
 import net.pushover.client.PushoverException;
 import net.pushover.client.PushoverMessage;
 import net.pushover.client.PushoverRestClient;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -23,6 +25,8 @@ import org.mcstats.MetricsLite;
 import java.io.File;
 import java.io.IOException;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.UUID;
 import java.util.logging.Level;
 
@@ -40,7 +44,8 @@ public class MinecraftPush extends JavaPlugin implements Listener
 
 	public String titleEnd = "";
 
-	public void onEnable() {
+	public void onEnable()
+	{
 		getServer().getPluginManager().registerEvents(this, this);
 
 		int users = getUserKeysFileConfiguration().getKeys(false).size();
@@ -63,13 +68,32 @@ public class MinecraftPush extends JavaPlugin implements Listener
 		else
 			titleEnd = " (" + getServer().getServerName() + ")";
 
+		Timer ramUsageTimer = new Timer();
+		ramUsageTimer.scheduleAtFixedRate(new RamChecker(), 0, 10000*5);
+
 		// Plugin Metrics
-		try {
+		try
+		{
 			MetricsLite m = new MetricsLite(this);
 			m.start();
-		}
-		catch (Exception e) {
+		} catch (Exception e)
+		{
 			// Cannot upload data :(
+		} catch (NoSuchMethodError e)
+		{
+			// Old Minecraft version
+		}
+	}
+
+	class RamChecker extends TimerTask
+	{
+		long mb = 1048576;
+
+		@Override
+		public void run()
+		{
+			if (Runtime.getRuntime().freeMemory() < (mb * 20))
+				push("Server almost out of memory!", true, true);
 		}
 	}
 
@@ -77,8 +101,10 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	{
 		int counter = 0;
 
-		for (Map.Entry entry : getUserKeysFileConfiguration().getValues(false).entrySet()) {
-			if (entry.getValue().equals("INVALID")) {
+		for (Map.Entry entry : getUserKeysFileConfiguration().getValues(false).entrySet())
+		{
+			if (entry.getValue().equals("INVALID"))
+			{
 				counter++;
 			}
 		}
@@ -87,10 +113,11 @@ public class MinecraftPush extends JavaPlugin implements Listener
 		return counter;
 	}
 
-	public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+	public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args)
+	{
 		if (cmd.getName().equalsIgnoreCase("pushover"))
 		{
-			if (! (sender instanceof Player))
+			if (!(sender instanceof Player))
 			{
 				sender.sendMessage("You can only enable or disable notifications as a player.");
 				return true;
@@ -108,15 +135,13 @@ public class MinecraftPush extends JavaPlugin implements Listener
 
 						sender.sendMessage("§aPush notifications enabled! §fYou can disable them at any time using /pushover disable.");
 						return true;
-					}
-					else
+					} else
 					{
 						sender.sendMessage("§cYou don't have permission to receive push notifications!");
 						return true;
 					}
 				}
-			}
-			else if (getCmdArgsLength(args) == 0)
+			} else if (getCmdArgsLength(args) == 0)
 				if (args[0].equalsIgnoreCase("disable"))
 				{
 					getUserKeysFileConfiguration().set(((Player) sender).getUniqueId().toString(), null);
@@ -134,10 +159,10 @@ public class MinecraftPush extends JavaPlugin implements Listener
 			sender.sendMessage(new String[]{
 					"Use the /pushover command to enable or disable push notifications.",
 					"MinecraftPush, Copyright (C) Jop Vernooij, 2014. http://www.jopv.net/ " +
-					"This is NOT an official Pushover app. Pushover is a trademark and product of Superblock, LLC. " +
-					"This plugin is powered by pushover4j: https://github.com/sps/pushover4j " +
-					"Source available at https://github.com/Jop-V/MinecraftPush/. " +
-					"If this plugin is an important part of your Minecraft, please donate a little bitcoin: :) 1LkJKBJuadQxdZN46yuyWzn2kncSLm1tvU"});
+							"This is NOT an official Pushover app. Pushover is a trademark and product of Superblock, LLC. " +
+							"This plugin is powered by pushover4j: https://github.com/sps/pushover4j " +
+							"Source available at https://github.com/Jop-V/MinecraftPush/. " +
+							"If this plugin is an important part of your Minecraft, please donate a little bitcoin: :) 1LkJKBJuadQxdZN46yuyWzn2kncSLm1tvU"});
 			return true;
 		}
 
@@ -154,8 +179,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 
 				getServer().broadcastMessage("§d[Broadcasting] " + message);
 				push(message);
-			}
-			else sender.sendMessage("§cYou don't have permission to broadcast!");
+			} else sender.sendMessage("§cYou don't have permission to broadcast!");
 			return true;
 		}
 		return false;
@@ -164,18 +188,18 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	/**
 	 * Workaround for some really weird behavior.
 	 */
-	public int getCmdArgsLength(String[]args)
+	public int getCmdArgsLength(String[] args)
 	{
 		if (args != null)
 			return args.length - 1;
 		else
 			return -1;
 	}
-	
-	@EventHandler (priority = EventPriority.MONITOR)
+
+	@EventHandler(priority = EventPriority.MONITOR)
 	public void onPlayerJoin(PlayerJoinEvent e)
 	{
-		push( e.getJoinMessage() );
+		push(e.getJoinMessage());
 
 		// Invalid Pushover user key warning.
 		if (invalidUsers == 0)
@@ -190,10 +214,15 @@ public class MinecraftPush extends JavaPlugin implements Listener
 		}
 	}
 
-	@EventHandler (priority = EventPriority.MONITOR)
+	@EventHandler(priority = EventPriority.MONITOR)
 	public void onPlayerQuit(PlayerQuitEvent e)
 	{
-		push( e.getQuitMessage() );
+		push(e.getQuitMessage());
+	}
+
+	public void push(String message)
+	{
+		push(message, false, false);
 	}
 
 	/**
@@ -201,7 +230,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	 * @param message The message to be sent. Color codes will be automatically stripped out.
 	 */
 	@SuppressWarnings("SuspiciousMethodCalls")
-	public void push(String message)
+	public void push(String message, boolean opOnly, boolean warning)
 	{
 		Map<String, Object> map = getUserKeysFileConfiguration().getValues(false);
 
@@ -218,28 +247,39 @@ public class MinecraftPush extends JavaPlugin implements Listener
 			{
 				try
 				{
-					if (Bukkit.getOfflinePlayer(playerUuid).isBanned())
+					OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerUuid);
+					if (offlinePlayer.isBanned())
 					{
 						getUserKeysFileConfiguration().set(playerUuidString, map.get(playerUuidString) + "BANNED");
-						return;
+						continue;
 					}
 					else if ( ((String )map.get(playerUuidString)).endsWith("BANNED") )
 					{
 						String s = (String) map.get(playerUuidString);
 						getUserKeysFileConfiguration().set(playerUuidString, s.substring(0, s.indexOf("BANNED")));
 					}
+
+					if (opOnly && ! offlinePlayer.isOp())
+					{
+						continue;
+					}
 				}
-				catch (Exception ignored) {}
+				catch (Exception e) {
+					e.printStackTrace();
+				}
 
 				try
 				{
-					pushoverRestClient.pushMessage(PushoverMessage.builderWithApiToken("autoU13MYYXYxMaeupaqF7U7mBe9Bj")
+					PushoverMessage.Builder pm = PushoverMessage.builderWithApiToken("autoU13MYYXYxMaeupaqF7U7mBe9Bj")
 									.setUserId(playerPushoverKey)
 									.setSound("gamelan")
 									.setTitle("Minecraft" + titleEnd)
-									.setMessage(ChatColor.stripColor(message))
-									.build()
-					);
+									.setMessage(ChatColor.stripColor(message));
+
+					if (warning)
+						pm.setPriority(MessagePriority.HIGH);
+
+					pushoverRestClient.pushMessage(pm.build());
 				}
 				catch (PushoverException e)
 				{
@@ -286,7 +326,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 		{
 			player = getServer().getPlayer(uuid);
 		}
-		catch (Exception e)
+		catch (NoSuchMethodError e)
 		{
 			for (Player p : getServer().getOnlinePlayers())
 				if (p.getUniqueId().equals(uuid))
