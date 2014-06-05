@@ -20,13 +20,12 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import org.bukkit.scheduler.BukkitScheduler;
 import org.mcstats.MetricsLite;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.Map;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.UUID;
 import java.util.logging.Level;
 
@@ -44,8 +43,17 @@ public class MinecraftPush extends JavaPlugin implements Listener
 
 	public String titleEnd = "";
 
+	boolean canPush = true;
+
 	public void onEnable()
 	{
+		if (! getServer().getOnlineMode())
+		{
+			getLogger().severe("Server is in offline mode! Can't send notifications.");
+			canPush = false;
+			return;
+		}
+
 		getServer().getPluginManager().registerEvents(this, this);
 
 		int users = getUserKeysFileConfiguration().getKeys(false).size();
@@ -68,32 +76,38 @@ public class MinecraftPush extends JavaPlugin implements Listener
 		else
 			titleEnd = " (" + getServer().getServerName() + ")";
 
-		Timer ramUsageTimer = new Timer();
-		ramUsageTimer.scheduleAtFixedRate(new RamChecker(), 0, 10000*5);
+		try
+		{
+			BukkitScheduler scheduler = Bukkit.getServer().getScheduler();
+			scheduler.scheduleSyncRepeatingTask(this, new Runnable()
+			{
+				long mb = 1048576;
+
+				@Override
+				public void run()
+				{
+					if (Runtime.getRuntime().freeMemory() < (20 * mb))
+						push("Server almost out of memory!", true, true);
+				}
+			}, 0L, 3000L);
+		}
+		catch (Error e) {
+			getLogger().warning("Your Bukkit version is too old. Cannot send out of memory warnings to operators.");
+		}
 
 		// Plugin Metrics
 		try
 		{
 			MetricsLite m = new MetricsLite(this);
 			m.start();
-		} catch (Exception e)
+		}
+		catch (Exception e)
 		{
 			// Cannot upload data :(
-		} catch (NoSuchMethodError e)
+		}
+		catch (NoSuchMethodError e)
 		{
 			// Old Minecraft version
-		}
-	}
-
-	class RamChecker extends TimerTask
-	{
-		long mb = 1048576;
-
-		@Override
-		public void run()
-		{
-			if (Runtime.getRuntime().freeMemory() < (mb * 20))
-				push("Server almost out of memory!", true, true);
 		}
 	}
 
@@ -129,11 +143,15 @@ public class MinecraftPush extends JavaPlugin implements Listener
 				{
 					if (sender.hasPermission("minecraftpush.receive"))
 					{
-						// Unfortunately, Pushover user key validation is not yet possible: https://github.com/sps/pushover4j/issues/3
+						// Unfortunately, Pushover user key validation is not yet possible: https://github.com/Jop-V/MinecraftPush/issues/2
 						getUserKeysFileConfiguration().set(((Player) sender).getUniqueId().toString(), args[1]);
 						saveUserKeysFile();
 
-						sender.sendMessage("§aPush notifications enabled! §fYou can disable them at any time using /pushover disable.");
+						StringBuilder messageBuilder = new StringBuilder("§aPush notifications enabled!§f ");
+						if (! canPush)
+							messageBuilder.append("§6You won't receive any at the moment though, because the server is in offline mode.§f ");
+						messageBuilder.append("You can disable them at any time using /pushover disable.");
+						sender.sendMessage(messageBuilder.toString());
 						return true;
 					} else
 					{
@@ -168,21 +186,51 @@ public class MinecraftPush extends JavaPlugin implements Listener
 
 		if (cmd.getName().equalsIgnoreCase("broadcast"))
 		{
+			if (getCmdArgsLength(args) < 1)
+				return false;
+
 			if (sender.hasPermission("minecraftpush.broadcast"))
 			{
-				StringBuilder builder = new StringBuilder();
-
-				for (String s : args)
-					builder.append(s).append(' ');
-
-				String message = builder.toString().trim();
-
+				if (!canPush) sender.sendMessage("§cServer is in offline mode, can't notify offline players!");
+				String message = messageFromCmdAgs(args);
 				getServer().broadcastMessage("§d[Broadcasting] " + message);
 				push(message);
 			} else sender.sendMessage("§cYou don't have permission to broadcast!");
 			return true;
 		}
+
+		if (cmd.getName().equalsIgnoreCase("warnops"))
+		{
+			if (getCmdArgsLength(args) < 1)
+				return false;
+
+			if (sender.hasPermission("minecraftpush.warnops"))
+			{
+				if (!canPush) sender.sendMessage("§cServer is in offline mode, can't notify offline operators!");
+				String message = messageFromCmdAgs(args);
+				for (Player p : getServer().getOnlinePlayers())
+					if (p.isOp()) p.sendMessage(message);
+				push(sender.getName() + " warned: " + message, true, true);
+			}
+			else if (sender.isOp())
+				sender.sendMessage("§cYou are an operator yourself...");
+			else
+				sender.sendMessage("§cYou don't have permission to warn operators!");
+
+			return true;
+		}
+
 		return false;
+	}
+
+	public String messageFromCmdAgs(String[] args)
+	{
+		StringBuilder builder = new StringBuilder();
+
+		for (String s : args)
+			builder.append(s).append(' ');
+
+		return builder.toString().trim();
 	}
 
 	/**
@@ -228,10 +276,14 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	/**
 	 * Push a message to all offline players with push notifications enabled.
 	 * @param message The message to be sent. Color codes will be automatically stripped out.
+	 * @param opOnly Whether only operators should receive this message.
+	 * @param highPriority Whether this message is of high priority.
 	 */
 	@SuppressWarnings("SuspiciousMethodCalls")
-	public void push(String message, boolean opOnly, boolean warning)
+	public void push(String message, boolean opOnly, boolean highPriority)
 	{
+		if (!canPush) return;
+
 		Map<String, Object> map = getUserKeysFileConfiguration().getValues(false);
 
 		for (String playerUuidString : map.keySet())
@@ -241,7 +293,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 			String playerPushoverKey = String.valueOf(map.get(playerUuidString));
 
 			if (playerPushoverKey.equals("INVALID") || playerPushoverKey.equals("BANNED"))
-				return;
+				continue;
 
 			if (onlinePlayer == null /* Player is offline, so a notification needs to be sent */)
 			{
@@ -253,18 +305,16 @@ public class MinecraftPush extends JavaPlugin implements Listener
 						getUserKeysFileConfiguration().set(playerUuidString, map.get(playerUuidString) + "BANNED");
 						continue;
 					}
-					else if ( ((String )map.get(playerUuidString)).endsWith("BANNED") )
+					else if ( ((String) map.get(playerUuidString)).endsWith("BANNED") )
 					{
 						String s = (String) map.get(playerUuidString);
 						getUserKeysFileConfiguration().set(playerUuidString, s.substring(0, s.indexOf("BANNED")));
 					}
 
 					if (opOnly && ! offlinePlayer.isOp())
-					{
 						continue;
-					}
 				}
-				catch (Exception e) {
+				catch (NoSuchMethodError e) {
 					e.printStackTrace();
 				}
 
@@ -276,7 +326,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 									.setTitle("Minecraft" + titleEnd)
 									.setMessage(ChatColor.stripColor(message));
 
-					if (warning)
+					if (highPriority)
 						pm.setPriority(MessagePriority.HIGH);
 
 					pushoverRestClient.pushMessage(pm.build());
