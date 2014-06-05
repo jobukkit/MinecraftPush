@@ -208,9 +208,21 @@ public class MinecraftPush extends JavaPlugin implements Listener
 			{
 				if (!canPush) sender.sendMessage("§cServer is in offline mode, can't notify offline operators!");
 				String message = messageFromCmdAgs(args);
+
+				int counter = 0;
+
 				for (Player p : getServer().getOnlinePlayers())
-					if (p.isOp()) p.sendMessage(message);
-				push(sender.getName() + " warned: " + message, true, true);
+				{
+					if (p.isOp())
+					{
+						p.sendMessage(sender.getName() + " warned: " + message);
+						counter++;
+					}
+				}
+
+				counter += push(sender.getName() + " warned: " + message, true, true);
+
+				sender.sendMessage("§aWarned " + Integer.toString(counter) + " operators.");
 			}
 			else if (sender.isOp())
 				sender.sendMessage("§cYou are an operator yourself...");
@@ -278,13 +290,15 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	 * @param message The message to be sent. Color codes will be automatically stripped out.
 	 * @param opOnly Whether only operators should receive this message.
 	 * @param highPriority Whether this message is of high priority.
+	 * @return The amount of players notified.
 	 */
 	@SuppressWarnings("SuspiciousMethodCalls")
-	public void push(String message, boolean opOnly, boolean highPriority)
+	public int push(String message, boolean opOnly, boolean highPriority)
 	{
-		if (!canPush) return;
+		if (!canPush) return 0;
 
 		Map<String, Object> map = getUserKeysFileConfiguration().getValues(false);
+		int counter = 0;
 
 		for (String playerUuidString : map.keySet())
 		{
@@ -330,6 +344,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 						pm.setPriority(MessagePriority.HIGH);
 
 					pushoverRestClient.pushMessage(pm.build());
+					counter++;
 				}
 				catch (PushoverException e)
 				{
@@ -343,6 +358,8 @@ public class MinecraftPush extends JavaPlugin implements Listener
 				}
 			}
 		}
+
+		return counter;
 	}
 
 	public void loadUserKeysFile() {
