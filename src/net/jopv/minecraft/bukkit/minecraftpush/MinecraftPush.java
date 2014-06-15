@@ -4,7 +4,6 @@ import net.pushover.client.MessagePriority;
 import net.pushover.client.PushoverException;
 import net.pushover.client.PushoverMessage;
 import net.pushover.client.PushoverRestClient;
-
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
@@ -19,7 +18,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-
 import org.bukkit.scheduler.BukkitScheduler;
 import org.mcstats.MetricsLite;
 
@@ -40,13 +38,16 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	private File userKeysFile = null;
 
 	public int invalidUsers;
+	public int bannedUsers;
 
 	public String titleEnd = "";
 
 	boolean canPush = true;
+	boolean canCheckOfflinePlayers = true;
 
 	public void onEnable()
 	{
+		// Online mode check
 		if (! getServer().getOnlineMode())
 		{
 			getLogger().severe("Server is in offline mode! Can't send notifications.");
@@ -54,14 +55,28 @@ public class MinecraftPush extends JavaPlugin implements Listener
 			return;
 		}
 
+		// Register events
 		getServer().getPluginManager().registerEvents(this, this);
 
+		// User count
 		int users = getUserKeysFileConfiguration().getKeys(false).size();
-		if (users != 1)
-			getLogger().info(Integer.toString(users) + " users registered.");
+		int bannedUsers = getAmountOfBannedUsers();
+		if (bannedUsers == 0)
+		{
+			if (users != 1)
+				getLogger().info(Integer.toString(users) + " users registered.");
+			else
+				getLogger().info("1 user registered.");
+		}
 		else
-			getLogger().info("1 user registered.");
+		{
+			if (users != 1)
+				getLogger().info(Integer.toString(users) + " users registered, of which " + Integer.toString(bannedUsers) + " are banned.");
+			else
+				getLogger().info("1 user registered, which is banned.");
+		}
 
+		// Invalid-user count
 		int invalidUsers = getAmountOfInvalidUsers();
 		if (invalidUsers > 0)
 		{
@@ -71,11 +86,13 @@ public class MinecraftPush extends JavaPlugin implements Listener
 				getLogger().warning("1 user has apparently entered an invalid Pushover user key! It will not receive any notifications. It's user key will be deleted as soon as it connects with the server again, so it can be warned.");
 		}
 
+		// Server name
 		if (getServer().getServerName().equals("Unknown Server"))
 			getLogger().info("Your Minecraft is unnamed. If your Minecraft has a name, you should set it in server.properties, and then reload or restart your server.");
 		else
 			titleEnd = " (" + getServer().getServerName() + ")";
 
+		// RAM checker
 		try
 		{
 			BukkitScheduler scheduler = Bukkit.getServer().getScheduler();
@@ -92,38 +109,60 @@ public class MinecraftPush extends JavaPlugin implements Listener
 			}, 0L, 3000L);
 		}
 		catch (Error e) {
-			getLogger().warning("Your Bukkit version is too old. Cannot send out of memory warnings to operators.");
+			getLogger().warning("Your Bukkit version is too old. Cannot send out-of-memory warnings to operators.");
 		}
 
+		canCheckOfflinePlayers = bukkitCompatibilityCheck();
+
 		// Plugin Metrics
-		try
-		{
+		try {
 			MetricsLite m = new MetricsLite(this);
 			m.start();
 		}
-		catch (Exception e)
-		{
+		catch (Exception e) {
 			// Cannot upload data :(
 		}
-		catch (NoSuchMethodError e)
-		{
-			// Old Minecraft version
+		catch (NoSuchMethodError e) {
+			// Old API version
 		}
 	}
 
-	int getAmountOfInvalidUsers()
-	{
+	boolean bukkitCompatibilityCheck() {
+		try
+		{
+			getServer().getOfflinePlayers()[0].getUniqueId();
+			return true;
+		}
+		catch (NoSuchMethodError e) {
+			getLogger().warning("Your Bukkit version is too old. Cannot use /warnops, and performance will be lower.");
+			getAmountOfBannedUsers();
+			return false;
+		}
+	}
+
+	int getAmountOfInvalidUsers() {
 		int counter = 0;
 
-		for (Map.Entry entry : getUserKeysFileConfiguration().getValues(false).entrySet())
-		{
-			if (entry.getValue().equals("INVALID"))
-			{
+		for (Map.Entry entry : getUserKeysFileConfiguration().getValues(false).entrySet()) {
+			if (entry.getValue().equals("INVALID")) {
 				counter++;
 			}
 		}
 
 		invalidUsers = counter;
+		return counter;
+	}
+
+	int getAmountOfBannedUsers() {
+		int counter = 0;
+
+		for (Map.Entry entry : getUserKeysFileConfiguration().getValues(false).entrySet()) {
+			if (((String) entry.getValue()).endsWith("BANNED")) {
+				counter++;
+			}
+		}
+
+		bannedUsers = counter;
 		return counter;
 	}
 
@@ -206,11 +245,13 @@ public class MinecraftPush extends JavaPlugin implements Listener
 
 			if (sender.hasPermission("minecraftpush.warnops"))
 			{
-				if (!canPush) sender.sendMessage("§cServer is in offline mode, can't notify offline operators!");
+				if (! canPush) sender.sendMessage("§cServer is in offline mode, can't notify offline operators!");
+				if (! canCheckOfflinePlayers) sender.sendMessage("§cBukkit version too old, can't notify offline operators!");
 				String message = messageFromCmdAgs(args);
 
 				int counter = 0;
 
+				// Warn online operators
 				for (Player p : getServer().getOnlinePlayers())
 				{
 					if (p.isOp())
@@ -220,6 +261,7 @@ public class MinecraftPush extends JavaPlugin implements Listener
 					}
 				}
 
+				// Warn offline operators
 				counter += push(sender.getName() + " warned: " + message, true, true);
 
 				sender.sendMessage("§aWarned " + Integer.toString(counter) + " operators.");
@@ -261,16 +303,23 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	{
 		push(e.getJoinMessage());
 
-		// Invalid Pushover user key warning.
-		if (invalidUsers == 0)
+		if (invalidUsers == 0 && canCheckOfflinePlayers)
 			return;
 		Map map = getUserKeysFileConfiguration().getValues(false);
 		UUID uuid = e.getPlayer().getUniqueId();
-		if (map.containsKey(uuid.toString()) && map.get(uuid.toString()).equals("INVALID"))
+		if (map.containsKey(uuid.toString()))
 		{
-			getOnlinePlayerByUuid(uuid).sendMessage("§cYour Pushover user key turned out te be invalid! Sorry for not telling you earlier. Please re-enable notifications with a valid Pushover user key.");
-			getUserKeysFileConfiguration().set(uuid.toString(), null);
-			saveUserKeysFile();
+			String s = (String) map.get(uuid.toString());
+
+			if (s.endsWith("BANNED"))
+				getUserKeysFileConfiguration().set(uuid.toString(), s.substring(0, s.indexOf("BANNED")));
+
+			if (s.equals("INVALID"))
+			{
+				getOnlinePlayerByUuid(uuid).sendMessage("§cYour Pushover user key turned out te be invalid! Sorry for not telling you earlier. Please re-enable notifications with a valid Pushover user key.");
+				getUserKeysFileConfiguration().set(uuid.toString(), null);
+				saveUserKeysFile();
+			}
 		}
 	}
 
@@ -278,11 +327,22 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	public void onPlayerQuit(PlayerQuitEvent e)
 	{
 		push(e.getQuitMessage());
+
+		if (! canCheckOfflinePlayers) {
+			if (e.getPlayer().isBanned()) {
+				getUserKeysFileConfiguration().set(e.getPlayer().getUniqueId().toString(), getUserKeysFileConfiguration().get(e.getPlayer().getUniqueId().toString()).toString() + "BANNED");
+			}
+		}
 	}
 
-	public void push(String message)
+	/**
+	 * Push a message to all offline players with push notifications enabled.
+	 * @param message The message to be sent. Color codes will be automatically stripped out.
+	 * @return The amount of players notified.
+	 */
+	public int push(String message)
 	{
-		push(message, false, false);
+		return push(message, false, false);
 	}
 
 	/**
@@ -295,7 +355,11 @@ public class MinecraftPush extends JavaPlugin implements Listener
 	@SuppressWarnings("SuspiciousMethodCalls")
 	public int push(String message, boolean opOnly, boolean highPriority)
 	{
-		if (!canPush) return 0;
+		if (! canPush) return 0;
+		if (! canCheckOfflinePlayers && opOnly) return 0;
+
+		if (! opOnly && highPriority)
+			getLogger().warning("A high priority message is being sent to regular players. This is probably a bad thing.");
 
 		Map<String, Object> map = getUserKeysFileConfiguration().getValues(false);
 		int counter = 0;
@@ -306,30 +370,29 @@ public class MinecraftPush extends JavaPlugin implements Listener
 			Player onlinePlayer = getOnlinePlayerByUuid(playerUuid);
 			String playerPushoverKey = String.valueOf(map.get(playerUuidString));
 
-			if (playerPushoverKey.equals("INVALID") || playerPushoverKey.equals("BANNED"))
+			if (playerPushoverKey.equals("INVALID") || playerPushoverKey.endsWith("BANNED"))
 				continue;
 
 			if (onlinePlayer == null /* Player is offline, so a notification needs to be sent */)
 			{
-				try
+				if (canCheckOfflinePlayers)
 				{
 					OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerUuid);
 					if (offlinePlayer.isBanned())
 					{
 						getUserKeysFileConfiguration().set(playerUuidString, map.get(playerUuidString) + "BANNED");
 						continue;
-					}
-					else if ( ((String) map.get(playerUuidString)).endsWith("BANNED") )
+					} else if (((String) map.get(playerUuidString)).endsWith("BANNED"))
 					{
 						String s = (String) map.get(playerUuidString);
 						getUserKeysFileConfiguration().set(playerUuidString, s.substring(0, s.indexOf("BANNED")));
 					}
 
-					if (opOnly && ! offlinePlayer.isOp())
+					if (opOnly && !offlinePlayer.isOp())
 						continue;
 				}
-				catch (NoSuchMethodError e) {
-					e.printStackTrace();
+				else if (((String) map.get(playerUuidString)).endsWith("BANNED")) {
+					continue;
 				}
 
 				try
